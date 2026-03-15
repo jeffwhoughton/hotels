@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Rome Hotel Comparison</title>
+  
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+  <style>
+    :root {
+      --primary: #003580; --secondary: #0071c2; --bg: #f5f5f5; 
+      --text: #333; --positive: #008009; --negative: #d93025;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background-color: var(--bg); color: var(--text);
+      height: 100vh; overflow: hidden; display: flex; flex-direction: column;
+    }
+
+    /* Loading Overlay */
+    #loading-overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: white; z-index: 9999; display: flex; 
+      justify-content: center; align-items: center; font-size: 20px; font-weight: bold;
+      flex-direction: column;
+    }
+
+    /* Top Bar */
+    #top-bar {
+      height: 55px; background-color: var(--primary); color: white;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0 15px; flex-shrink: 0; z-index: 100;
+    }
+    #top-bar button { background: none; border: none; color: white; font-size: 16px; font-weight: bold; cursor: pointer; padding: 5px; }
+    #hamburger { font-size: 24px; }
+    
+    #top-nav-controls {
+      display: flex; align-items: center; gap: 15px; font-size: 16px; font-weight: bold;
+    }
+    
+    /* Hamburger Menu Backdrop */
+    #menu-backdrop {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.6); z-index: 990; 
+      opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+    }
+    #menu-backdrop.open {
+      opacity: 1; pointer-events: auto;
+    }
+
+    /* Hamburger Menu */
+    #menu-overlay {
+      position: fixed; top: 0; left: 0; width: 95%; height: 100vh;
+      background: white; z-index: 1000; box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+      transform: translateX(-100%); transition: transform 0.3s ease;
+      display: flex; flex-direction: column;
+    }
+    #menu-overlay.open { transform: translateX(0); }
+    
+    #menu-header {
+      background: var(--primary); color: white; padding: 15px; 
+      display: flex; justify-content: space-between; align-items: center; font-size: 18px; font-weight: bold;
+      flex-shrink: 0;
+    }
+    #close-menu { background: none; border: none; color: white; font-size: 24px; }
+    
+    #menu-map { width: 100%; aspect-ratio: 1/1; flex-shrink: 0; background: #ccc; z-index: 1; border-bottom: 2px solid #ddd; }
+
+    #hotel-list { flex: 1; overflow-y: auto; padding: 0; margin: 0; list-style: none; }
+    #hotel-list li { padding: 15px; border-bottom: 1px solid #eee; font-size: 15px; cursor: pointer; }
+    #hotel-list li.active { background-color: #e6f2ff; font-weight: bold; }
+
+    /* Main Content Area */
+    #main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* Carousel Wrapper */
+    #carousel-container {
+      position: relative; height: 44%; width: 100%; background: #ccc;
+    }
+
+    #carousel {
+      height: 100%; width: 100%; display: flex; overflow-x: auto;
+      scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+    }
+    #carousel::-webkit-scrollbar { display: none; }
+    .slide { flex: 0 0 100%; height: 100%; scroll-snap-align: center; position: relative; }
+    .slide img { width: 100%; height: 100%; object-fit: cover; }
+    
+    /* Interactive Image Controls */
+    #carousel-controls {
+      position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7); color: white; border-radius: 25px;
+      display: flex; align-items: center; gap: 15px; padding: 6px 16px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3); z-index: 1000;
+    }
+    #carousel-controls button {
+      background: none; border: none; color: white; font-size: 16px; 
+      font-weight: bold; cursor: pointer; padding: 4px;
+    }
+    #slide-counter { font-size: 14px; font-weight: 600; min-width: 45px; text-align: center; }
+    #slide-map { font-size: 14px !important; text-transform: uppercase; border-left: 1px solid rgba(255,255,255,0.4) !important; padding-left: 12px !important; }
+
+    /* Info Section (Above Fold) */
+    #info-section {
+      height: 56%; padding: 12px 15px; display: flex; flex-direction: column; 
+      justify-content: space-between; background: white; position: relative;
+    }
+    #scrollable-info { overflow-y: auto; flex: 1; margin-bottom: 0; padding-right: 5px; padding-bottom: 10px; }
+    #hotel-name { font-size: 18px; font-weight: 800; line-height: 1.2; margin-bottom: 2px; }
+    #hotel-style { font-size: 12px; color: #666; font-weight: normal; text-transform: capitalize; margin-bottom: 8px; }
+    #hotel-desc { font-size: 14px; color: #444; line-height: 1.3; margin: 5px 0 10px 0; }
+
+    .reviews-box {
+      background: #f9f9f9; padding: 10px; border-radius: 8px; border: 1px solid #eee;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .review-item { font-size: 13px; line-height: 1.3; }
+    .pro-title { color: var(--positive); font-weight: bold; }
+    .con-title { color: var(--negative); font-weight: bold; }
+
+    #action-row {
+      display: flex; gap: 10px; align-items: center; margin-top: auto;
+      margin-left: -15px; margin-right: -15px; margin-bottom: -12px;
+      padding: 12px 15px; background: white; position: relative; z-index: 10;
+      box-shadow: 0 -4px 10px rgba(0,0,0,0.06);
+    }
+
+    #vote-widget {
+      display: flex; flex-direction: column; background: none; overflow: visible; height: 100%;
+      justify-content: center; align-items: center; position: relative; padding-bottom: 8px; min-width: 130px;
+    }
+    .vote-buttons {
+      display: flex; width: 100%;
+    }
+    .vote-buttons button {
+      flex: 1; background: none; border: none; padding: 2px 15px; font-size: 24px; font-weight: bold; cursor: pointer; color: #555;
+      display: flex; align-items: center; justify-content: center; gap: 5px;
+      -webkit-touch-callout: none; user-select: none; transition: transform 0.1s; border-radius: 6px;
+    }
+    .vote-buttons button span { font-size: 16px; margin-top: 4px; }
+    .vote-buttons button:hover { background: rgba(0,0,0,0.05); }
+    .vote-buttons button:active { transform: scale(0.95); }
+    .vote-buttons button.active { background: rgba(0,0,0,0.1); }
+    
+    /* Subtle tints for unselected, stronger tints for active */
+    #thumb-up { filter: grayscale(1) opacity(0.6) drop-shadow(0 0 0px green); }
+    #thumb-down { filter: grayscale(1) opacity(0.6) drop-shadow(0 0 0px red); }
+    
+    #thumb-up.active { filter: none; text-shadow: 0 0 5px rgba(0,128,9,0.5); color: var(--positive); }
+    #thumb-down.active { filter: none; text-shadow: 0 0 5px rgba(217,48,37,0.5); color: var(--negative); }
+
+    .hold-hint {
+      font-size: 9px; color: #888; position: absolute; bottom: 2px; width: 100%; text-align: center; pointer-events: none; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+
+    #name-modal, #voters-modal {
+      display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;
+    }
+    #name-modal-content, #voters-modal-content {
+      background: white; padding: 20px; border-radius: 8px; width: 80%; max-width: 300px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); text-align: center;
+    }
+    #name-modal.open, #voters-modal.open { display: flex; }
+    
+    #voters-list { text-align: left; list-style: none; padding: 0; margin: 0; max-height: 200px; overflow-y: auto; }
+    #voters-list li { padding: 5px 0; border-bottom: 1px solid #eee; font-size: 14px; }
+    #voters-list li:last-child { border-bottom: none; }
+
+    #book-btn {
+      flex: 1; display: flex; justify-content: center; align-items: center;
+      background: var(--secondary); color: white; text-decoration: none;
+      padding: 14px; border-radius: 6px; font-weight: bold; font-size: 16px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .landmark-label { font-size: 10px; font-weight: bold; background: none; border: none; box-shadow: none; color: var(--negative); text-shadow: 1px 1px 2px white; margin-bottom: -2px; }
+    .hotel-label { font-size: 10px; font-weight: bold; background: none; border: none; box-shadow: none; color: var(--secondary); text-shadow: 1px 1px 2px white; }
+    .leaflet-tooltip-top::before, .leaflet-tooltip-bottom::before, .leaflet-tooltip-left::before, .leaflet-tooltip-right::before { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- Loading State waiting for JSON -->
+  <div id="loading-overlay">
+    <div>Loading Hotel Data...</div>
+    <div style="font-size: 14px; font-weight: normal; color: #666; margin-top: 10px; text-align: center; padding: 20px;">
+      If this stays forever, ensure you are hosting this on a local server (python -m http.server) and that hotels_data.json exists.
+    </div>
+  </div>
+
+  <!-- Menu Backdrop -->
+  <div id="menu-backdrop"></div>
+
+  <!-- Top Bar -->
+  <div id="top-bar">
+    <button id="hamburger">☰</button>
+    <div id="top-nav-controls">
+      <button id="prev-btn">◀</button>
+      <span id="top-hotel-counter">0 / 0</span>
+      <button id="next-btn">▶</button>
+    </div>
+  </div>
+
+  <!-- Hamburger Menu -->
+  <div id="menu-overlay">
+    <div id="menu-header">
+      <span id="hotel-count">Hotels</span>
+      <button id="close-menu">✖</button>
+    </div>
+    <div id="menu-map"></div>
+    <ul id="hotel-list"></ul>
+  </div>
+
+  <!-- Main View -->
+  <div id="main-content">
+    
+    <!-- Image Carousel Wrapper -->
+    <div id="carousel-container">
+      <div id="carousel">
+        <!-- Slides dynamically injected here -->
+      </div>
+      
+      <!-- Interactive Navigation row -->
+      <div id="carousel-controls">
+        <button id="slide-prev">❮</button>
+        <span id="slide-counter">1 / 1</span>
+        <button id="slide-map">Map</button>
+        <button id="slide-next">❯</button>
+      </div>
+    </div>
+
+    <!-- Info Section -->
+    <div id="info-section">
+      <div id="scrollable-info">
+        <div id="hotel-name">Hotel Name</div>
+        <div id="hotel-style">Style</div>
+        <div id="hotel-desc">Description</div>
+        
+        <div class="reviews-box">
+          <div class="review-item"><span class="pro-title">Pros:</span> <span id="hotel-pos">Pros summary</span></div>
+          <div class="review-item"><span class="con-title">Cons:</span> <span id="hotel-neg">Cons summary</span></div>
+        </div>
+      </div>
+      
+      <div id="action-row">
+        <div id="vote-widget">
+          <div class="vote-buttons">
+            <button id="thumb-up" title="Hold to see who liked">
+              👍 <span><span id="thumb-up-count">0</span></span>
+            </button>
+            <button id="thumb-down" title="Hold to see who disliked">
+              👎 <span><span id="thumb-down-count">0</span></span>
+            </button>
+          </div>
+          <div class="hold-hint">Hold to See Votes</div>
+        </div>
+        <a id="book-btn" href="#" target="_blank">See on Booking.com</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Name Prompt Modal -->
+  <div id="name-modal">
+    <div id="name-modal-content">
+      <h3 style="margin-bottom: 10px;">Who are you?</h3>
+      <p style="font-size: 14px; color: #666; margin-bottom: 15px;">Please enter your name to vote.</p>
+      <input type="text" id="voter-name-input" placeholder="Your Name" style="width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px;">
+      <button id="save-name-btn" style="width: 100%; padding: 10px; background: var(--secondary); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Save & Vote</button>
+    </div>
+  </div>
+
+  <!-- Voters List Modal -->
+  <div id="voters-modal">
+    <div id="voters-modal-content">
+      <h3 id="voters-title" style="margin-bottom: 10px;">Voters</h3>
+      <ul id="voters-list"></ul>
+      <button id="close-voters-btn" style="margin-top: 15px; width: 100%; padding: 10px; background: #eee; color: #333; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Close</button>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <script>
+    let hotels = [];
+    let currentIndex = 0;
+    let menuMap = null;
+    let menuMarkers = [];
+    let miniMapObj = null;
+
+    const ROME_LAT = 41.9028;
+    const ROME_LNG = 12.4964;
+    const DEFAULT_MAP_ZOOM = 14;
+
+    const landmarks = [
+      { name: "Vatican", lat: 41.90253515256054, lng: 12.45486764454598 },
+      { name: "Piazza Navona", lat: 41.899131328307405, lng: 12.47306346854262 },
+      { name: "Trevi Fountain", lat: 41.9009055035166, lng: 12.483294405051144 },
+      { name: "Spanish Steps", lat: 41.90595263171886, lng: 12.482786533887458 },
+      { name: "Pantheon", lat: 41.89854688492658, lng: 12.47692654155946 },
+      { name: "Roman Forum", lat: 41.89215885183073, lng: 12.486002793018738 },
+      { name: "Colosseum", lat: 41.89021009731284, lng: 12.492525925317727 }
+    ];
+
+    function addLandmarksToMap(mapInstance) {
+      landmarks.forEach(lm => {
+        const isBottom = lm.name === "Piazza Navona" || lm.name === "Spanish Steps";
+        const dir = isBottom ? 'bottom' : 'top';
+        const offsetPos = isBottom ? [0, 2] : [0, -2];
+        L.circleMarker([lm.lat, lm.lng], {radius: 4, color: '#d93025', fillColor: '#d93025', fillOpacity: 1})
+          .addTo(mapInstance)
+          .bindTooltip(lm.name, {permanent: true, direction: dir, className: 'landmark-label', offset: offsetPos});
+      });
+    }
+
+    const MAP_TILES = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
+    // Fetch JSON Data
+    fetch('hotels_data.json')
+      .then(response => {
+        if (!response.ok) throw new Error("File not found");
+        return response.json();
+      })
+      .then(data => {
+        hotels = data.map(h => ({
+          ...h,
+          lat: h.lat || ROME_LAT + (Math.random() - 0.5) * 0.025,
+          lng: h.lng || ROME_LNG + (Math.random() - 0.5) * 0.025
+        }));
+
+        document.getElementById('loading-overlay').style.display = 'none';
+        document.getElementById('hotel-count').innerText = `Hotels (${hotels.length})`;
+        loadHotel(0);
+      })
+      .catch(error => {
+        console.error("Error loading JSON:", error);
+      });
+
+    // DOM Elements
+    const elName = document.getElementById('hotel-name');
+    const elStyle = document.getElementById('hotel-style');
+    const elDesc = document.getElementById('hotel-desc');
+    const elPros = document.getElementById('hotel-pos');
+    const elCons = document.getElementById('hotel-neg');
+    const elBook = document.getElementById('book-btn');
+    const elList = document.getElementById('hotel-list');
+    const carousel = document.getElementById('carousel');
+    const slideCounter = document.getElementById('slide-counter');
+
+    // Voting State configuration
+    const GOOGLE_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbya2u3C_XopOjnkTqzmCsY8VqelleydsE4QKEo2dZx3Kzc0K6O3LJQ34zBF0aC1ANPghQ/exec';
+    
+    let globalVotes = {};
+    let userName = localStorage.getItem('voter_name') || '';
+    let pendingVote = null;
+    let longPressTimer = null;
+
+    // Pre-fetch votes if web app URL is configured
+    if (GOOGLE_WEB_APP_URL && !GOOGLE_WEB_APP_URL.includes('REPLACE_THIS')) {
+      fetch(GOOGLE_WEB_APP_URL)
+        .then(res => res.json())
+        .then(data => {
+          globalVotes = data || {};
+          renderVotes();
+        })
+        .catch(err => console.error("Error fetching votes:", err));
+    }
+    
+    function getVotes(hotelName) {
+      if (GOOGLE_WEB_APP_URL && !GOOGLE_WEB_APP_URL.includes('REPLACE_THIS')) {
+        return globalVotes[hotelName] || { up: [], down: [] };
+      }
+      // Fallback to local storage if not using Google Sheets yet
+      const data = localStorage.getItem(`votes_${hotelName}`);
+      return data ? JSON.parse(data) : { up: [], down: [] };
+    }
+    
+    function saveVote(hotelName, type, name) {
+      const votes = getVotes(hotelName);
+      
+      // Remove any existing vote from this user for this hotel
+      votes.up = votes.up.filter(v => v.name !== name);
+      votes.down = votes.down.filter(v => v.name !== name);
+      
+      // Add new vote if it wasn't just toggling off
+      if (type !== 'none') {
+        votes[type].push({ name, date: new Date().toISOString() });
+      }
+      
+      if (GOOGLE_WEB_APP_URL && !GOOGLE_WEB_APP_URL.includes('REPLACE_THIS')) {
+        // Update local state instantly (Optimistic UI)
+        globalVotes[hotelName] = votes;
+        // Fire background request to save to Google Sheets
+        fetch(GOOGLE_WEB_APP_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ hotel: hotelName, name: name, vote: type })
+        }).catch(err => console.error("Failed to sync vote:", err));
+      } else {
+        localStorage.setItem(`votes_${hotelName}`, JSON.stringify(votes));
+      }
+      
+      return votes;
+    }
+
+    function renderVotes() {
+      if (!hotels[currentIndex]) return;
+      const h = hotels[currentIndex];
+      const votes = getVotes(h.name);
+      
+      const upBtn = document.getElementById('thumb-up');
+      const downBtn = document.getElementById('thumb-down');
+      
+      document.getElementById('thumb-up-count').innerText = votes.up.length;
+      document.getElementById('thumb-down-count').innerText = votes.down.length;
+      
+      const userUp = votes.up.some(v => v.name === userName);
+      const userDown = votes.down.some(v => v.name === userName);
+      
+      upBtn.classList.toggle('active', userUp);
+      downBtn.classList.toggle('active', userDown);
+    }
+    
+    function handleVoteClick(type) {
+      if (!hotels[currentIndex]) return;
+      
+      if (!userName) {
+        pendingVote = type;
+        document.getElementById('name-modal').classList.add('open');
+        document.getElementById('voter-name-input').focus();
+        return;
+      }
+      
+      const h = hotels[currentIndex];
+      const votes = getVotes(h.name);
+      const isAlreadyVoted = votes[type].some(v => v.name === userName);
+      
+      // Toggle off if clicking the same one again
+      saveVote(h.name, isAlreadyVoted ? 'none' : type, userName);
+      renderVotes();
+    }
+    
+    function showVoters() {
+      if (!hotels[currentIndex]) return;
+      const h = hotels[currentIndex];
+      const votes = getVotes(h.name);
+      
+      document.getElementById('voters-title').innerText = 'Votes';
+      const ul = document.getElementById('voters-list');
+      ul.innerHTML = '';
+      
+      const renderSection = (title, list) => {
+        const header = document.createElement('li');
+        header.innerHTML = `<strong>${title}</strong>`;
+        header.style.backgroundColor = '#f9f9f9';
+        header.style.padding = '8px 5px';
+        ul.appendChild(header);
+
+        if (list.length === 0) {
+          const li = document.createElement('li');
+          li.innerText = 'No votes yet';
+          li.style.color = '#888';
+          li.style.paddingLeft = '15px';
+          ul.appendChild(li);
+        } else {
+          list.forEach(v => {
+            const li = document.createElement('li');
+            li.innerText = v.name;
+            li.style.paddingLeft = '15px';
+            ul.appendChild(li);
+          });
+        }
+      };
+
+      renderSection('👍 Liked by', votes.up);
+      renderSection('👎 Disliked by', votes.down);
+      
+      document.getElementById('voters-modal').classList.add('open');
+    }
+    
+    // Wire up events
+    document.getElementById('save-name-btn').onclick = () => {
+      const input = document.getElementById('voter-name-input');
+      const val = input.value.trim();
+      if (val) {
+        userName = val;
+        localStorage.setItem('voter_name', userName);
+        document.getElementById('name-modal').classList.remove('open');
+        if (pendingVote) {
+          handleVoteClick(pendingVote);
+          pendingVote = null;
+        }
+      }
+    };
+    
+    document.getElementById('close-voters-btn').onclick = () => {
+      document.getElementById('voters-modal').classList.remove('open');
+    };
+    
+    // Desktop and Mobile long press logic
+    ['up', 'down'].forEach(type => {
+      const btn = document.getElementById(`thumb-${type}`);
+      
+      const startPress = (e) => {
+        if (e.type === 'touchstart') e.preventDefault(); // prevent contextual menu
+        longPressTimer = setTimeout(() => {
+          showVoters();
+          longPressTimer = null;
+        }, 500); // 500ms to register as long press
+      };
+      
+      const endPress = (e) => {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+          handleVoteClick(type);
+        }
+      };
+      
+      const cancelPress = () => {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      };
+
+      btn.addEventListener('mousedown', startPress);
+      btn.addEventListener('touchstart', startPress, {passive: false});
+      btn.addEventListener('mouseup', endPress);
+      btn.addEventListener('touchend', endPress);
+      btn.addEventListener('mouseleave', cancelPress);
+      btn.addEventListener('touchcancel', cancelPress);
+    });
+
+    function renderMenu() {
+      elList.innerHTML = '';
+      hotels.forEach((h, index) => {
+        const li = document.createElement('li');
+        li.innerText = `${index + 1}. ${h.name}`;
+        if (index === currentIndex) li.classList.add('active');
+        li.onclick = () => { loadHotel(index); toggleMenu(false); };
+        elList.appendChild(li);
+      });
+    }
+
+    function buildCarousel(h) {
+      carousel.innerHTML = '';
+      
+      // Fallback if no images are found
+      const imageList = (h.images && h.images.length > 0) ? h.images : [`https://picsum.photos/seed/${h.name.replace(/\s/g, '')}0/600/400`];
+
+      // Format image path helper (Checking if it's already an absolute URL vs a local file)
+      const getImgPath = (imgStr) => {
+        if (imgStr.startsWith('http') || imgStr.startsWith('data:')) {
+          return imgStr;
+        }
+        return `images/${imgStr}`;
+      };
+
+      // Generate Image Slides
+      imageList.forEach((imgStr, idx) => {
+        const slide = document.createElement('div');
+        slide.className = 'slide';
+        const img = document.createElement('img');
+        
+        const imgSrc = getImgPath(imgStr);
+
+        // Immediate load for first image, lazy-load for the rest
+        if (idx === 0) {
+          img.src = imgSrc;
+        } else {
+          img.dataset.src = imgSrc;
+          img.loading = "lazy"; 
+        }
+        
+        slide.appendChild(img);
+        carousel.appendChild(slide);
+      });
+
+      // Append Final Slide (Map)
+      const mapSlide = document.createElement('div');
+      mapSlide.className = 'slide';
+      mapSlide.id = 'mini-map-container';
+      carousel.appendChild(mapSlide);
+
+      // Reset scroll
+      carousel.scrollLeft = 0;
+      updateSlideCounter();
+
+      // Initialize Leaflet map in carousel
+      if (miniMapObj) {
+        miniMapObj.remove();
+        miniMapObj = null;
+      }
+      setTimeout(() => {
+        miniMapObj = L.map('mini-map-container', { zoomControl: false, attributionControl: false }).setView([h.lat, h.lng], DEFAULT_MAP_ZOOM);
+        L.tileLayer(MAP_TILES, { maxZoom: 19 }).addTo(miniMapObj);
+        L.marker([h.lat, h.lng]).addTo(miniMapObj);
+        addLandmarksToMap(miniMapObj);
+      }, 100);
+
+      // Start idle preloader for remaining images
+      setTimeout(idlePreloadImages, 800);
+    }
+
+    function loadHotel(index) {
+      if (index < 0) index = hotels.length - 1;
+      if (index >= hotels.length) index = 0;
+      currentIndex = index;
+
+      const h = hotels[currentIndex];
+      elName.innerText = `${currentIndex + 1}. ${h.name}`;
+      elStyle.innerText = h.style || '';
+      elDesc.innerText = h.desc;
+      elPros.innerText = h.pros;
+      elCons.innerText = h.cons;
+      
+      // Update Booking Button
+      elBook.href = h.url;
+      if (h.url && h.url.toLowerCase().includes('expedia.ca')) {
+        elBook.innerText = "See on Expedia.ca";
+      } else {
+        elBook.innerText = "See on Booking.com";
+      }
+
+      // Update Top Nav Counter
+      document.getElementById('top-hotel-counter').innerText = `${currentIndex + 1} of ${hotels.length}`;
+
+      buildCarousel(h);
+      renderMenu();
+      renderVotes();
+    }
+
+    // --- Carousel Controls & Swiping Logic ---
+
+    function updateSlideCounter() {
+      const width = carousel.clientWidth;
+      if (width === 0) return;
+      const index = Math.round(carousel.scrollLeft / width);
+      const totalSlides = carousel.children.length;
+
+      // Last slide is map
+      if (index === totalSlides - 1) {
+        slideCounter.innerText = 'Map';
+      } else {
+        slideCounter.innerText = `${index + 1} / ${totalSlides - 1}`;
+      }
+
+      // Proactively load next/prev image if currently swiping
+      const slides = carousel.querySelectorAll('.slide img');
+      [index, index + 1, index - 1].forEach(i => {
+        if (slides[i] && slides[i].dataset.src) {
+          slides[i].src = slides[i].dataset.src;
+          delete slides[i].dataset.src;
+        }
+      });
+    }
+
+    // Listen for manual user swipes
+    carousel.addEventListener('scroll', updateSlideCounter);
+
+    // Image Left Arrow (with loop to Map)
+    document.getElementById('slide-prev').onclick = () => {
+      if (carousel.scrollLeft <= 10) {
+        // We are at the start, jump/loop to the very end (the Map)
+        carousel.scrollTo({ left: carousel.scrollWidth, behavior: 'smooth' });
+      } else {
+        carousel.scrollBy({ left: -carousel.clientWidth, behavior: 'smooth' });
+      }
+    };
+
+    // Image Right Arrow (with loop back to start)
+    document.getElementById('slide-next').onclick = () => {
+      const maxScroll = carousel.scrollWidth - carousel.clientWidth;
+      if (carousel.scrollLeft >= maxScroll - 10) {
+        // We are at the very end, jump/loop back to the start
+        carousel.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        carousel.scrollBy({ left: carousel.clientWidth, behavior: 'smooth' });
+      }
+    };
+
+    // Map Jump Button
+    document.getElementById('slide-map').onclick = () => {
+      carousel.scrollTo({ left: carousel.scrollWidth, behavior: 'smooth' });
+    };
+
+    // Preload remaining lazy images during device idle time
+    function idlePreloadImages() {
+      const loadImg = () => {
+        document.querySelectorAll('.slide img[data-src]').forEach(img => {
+          img.src = img.dataset.src;
+          delete img.dataset.src;
+        });
+      };
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(loadImg);
+      } else {
+        loadImg();
+      }
+    }
+
+    // --- Top Navigation & Menu Logic ---
+
+    // The Prev/Next Hotel buttons also naturally loop because of the index limits set inside loadHotel()
+    document.getElementById('prev-btn').onclick = () => loadHotel(currentIndex - 1);
+    document.getElementById('next-btn').onclick = () => loadHotel(currentIndex + 1);
+
+    const elMenuOverlay = document.getElementById('menu-overlay');
+    const elMenuBackdrop = document.getElementById('menu-backdrop');
+
+    function createMapIcon(index, isActive) {
+      const color = isActive ? '#008009' : '#0071c2';
+      const size = isActive ? 24 : 18;
+      const fontSize = isActive ? 12 : 10;
+      return L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div style="background-color: ${color}; color: white; border-radius: 50%; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: ${fontSize}px; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${index + 1}</div>`,
+        iconSize: [size, size],
+        iconAnchor: [size/2, size/2]
+      });
+    }
+
+    function updateMenuMap() {
+      if (!menuMap) {
+        menuMap = L.map('menu-map', { zoomControl: false }).setView([ROME_LAT, ROME_LNG], DEFAULT_MAP_ZOOM);
+        L.tileLayer(MAP_TILES, { maxZoom: 19 }).addTo(menuMap);
+        addLandmarksToMap(menuMap);
+        
+        hotels.forEach((h, i) => {
+          const displayName = h.short_name || h.name;
+          const hotelNum = i + 1;
+          const isBottom = [7, 13, 29, 30, 31].includes(hotelNum);
+          const dir = isBottom ? 'bottom' : 'top';
+          const offsetPos = isBottom ? [0, 2] : [0, -2];
+          const m = L.marker([h.lat, h.lng], { icon: createMapIcon(i, false) }).addTo(menuMap);
+          m.bindTooltip(`<strong>${hotelNum}. ${displayName}</strong>`, {permanent: true, direction: dir, className: 'hotel-label', offset: offsetPos});
+          m.on('click', () => { selectFromMap(i); });
+          menuMarkers.push(m);
+        });
+      }
+      
+      menuMarkers.forEach((m, i) => {
+        if (i === currentIndex) {
+          m.setIcon(createMapIcon(i, true));
+          m.setZIndexOffset(1000);
+        } else {
+          m.setIcon(createMapIcon(i, false));
+          m.setZIndexOffset(0);
+        }
+      });
+      setTimeout(() => { if (menuMap) { menuMap.invalidateSize(); if (hotels[currentIndex]) { menuMap.panTo([hotels[currentIndex].lat, hotels[currentIndex].lng]); } } }, 100);
+    }
+
+    function toggleMenu(forceOpen) {
+      const isOpen = forceOpen !== undefined ? forceOpen : !elMenuOverlay.classList.contains('open');
+      if (isOpen) {
+        elMenuOverlay.classList.add('open');
+        elMenuBackdrop.classList.add('open');
+        updateMenuMap();
+      } else {
+        elMenuOverlay.classList.remove('open');
+        elMenuBackdrop.classList.remove('open');
+      }
+    }
+
+    document.getElementById('hamburger').onclick = () => toggleMenu(true);
+    document.getElementById('close-menu').onclick = () => toggleMenu(false);
+    elMenuBackdrop.onclick = () => toggleMenu(false); // Clicking dark area closes menu
+
+    window.selectFromMap = function(index) { 
+      loadHotel(index); 
+      toggleMenu(false); 
+    };
+
+  </script>
+</body>
+</html>
